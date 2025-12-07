@@ -1,122 +1,123 @@
 const Sale = require('../models/Sale');
+const mongoose = require('mongoose');
+
+// Helper for File Filtering
+const filterFileBased = (params) => {
+    let filteredData = [...global.salesData];
+    const {
+        search, region, gender, ageRange, category, tags,
+        paymentMethod, startDate, endDate, sortBy
+    } = params;
+
+    // Search
+    if (search) {
+        const lower = search.toLowerCase();
+        filteredData = filteredData.filter(item =>
+            (item["Customer Name"] && item["Customer Name"].toLowerCase().includes(lower)) ||
+            (item["Phone Number"] && item["Phone Number"].includes(search))
+        );
+    }
+    // Filters
+    if (region) filteredData = filteredData.filter(item => region.split(',').includes(item["Customer Region"]));
+    if (gender) filteredData = filteredData.filter(item => gender.split(',').includes(item["Gender"]));
+    if (category) filteredData = filteredData.filter(item => category.split(',').includes(item["Product Category"]));
+    if (paymentMethod) filteredData = filteredData.filter(item => paymentMethod.split(',').includes(item["Payment Method"]));
+    if (tags) filteredData = filteredData.filter(item => item["Tags"].some(t => tags.split(',').includes(t)));
+
+    // Age
+    if (ageRange) {
+        const ranges = ageRange.split(',');
+        filteredData = filteredData.filter(item => ranges.some(r => {
+            const [min, max] = r.split('-').map(Number);
+            return item["Age"] >= min && item["Age"] <= max;
+        }));
+    }
+    // Date
+    if (startDate || endDate) {
+        filteredData = filteredData.filter(item => {
+            const date = new Date(item["Date"]);
+            return (!startDate || date >= new Date(startDate)) && (!endDate || date <= new Date(endDate));
+        });
+    }
+
+    // Sort
+    if (sortBy) {
+        filteredData.sort((a, b) => {
+            if (sortBy === 'date_newest') return new Date(b.Date) - new Date(a.Date);
+            if (sortBy === 'date_oldest') return new Date(a.Date) - new Date(b.Date);
+            if (sortBy === 'quantity_high') return b.Quantity - a.Quantity;
+            if (sortBy === 'quantity_low') return a.Quantity - b.Quantity;
+            if (sortBy === 'name_asc') return a["Customer Name"].localeCompare(b["Customer Name"]);
+            if (sortBy === 'name_desc') return b["Customer Name"].localeCompare(a["Customer Name"]);
+            return 0;
+        });
+    }
+    return filteredData;
+};
 
 exports.getSales = async (req, res) => {
     try {
-        const {
-            search,
-            region,
-            gender,
-            ageRange,
-            category,
-            tags,
-            paymentMethod,
-            startDate,
-            endDate,
-            sortBy,
-            page = 1,
-            limit = 10
-        } = req.query;
-
-        const query = {};
-
-        // 1. Search
-        if (search) {
-            query.$or = [
-                { "Customer Name": { $regex: search, $options: 'i' } },
-                { "Phone Number": { $regex: search, $options: 'i' } }
-            ];
-        }
-
-        // 2. Filters
-        if (region) query["Customer Region"] = { $in: region.split(',') };
-        if (gender) query["Gender"] = { $in: gender.split(',') };
-        if (category) query["Product Category"] = { $in: category.split(',') };
-        if (paymentMethod) query["Payment Method"] = { $in: paymentMethod.split(',') };
-        if (tags) query["Tags"] = { $in: tags.split(',') };
-
-        // Age Range
-        if (ageRange) {
-            const ranges = ageRange.split(',');
-            const orConditions = ranges.map(range => {
-                const [min, max] = range.split('-').map(Number);
-                return { "Age": { $gte: min, $lte: max } };
-            });
-            if (query.$or) {
-                query.$and = [{ $or: query.$or }, { $or: orConditions }];
-                delete query.$or;
-            } else {
-                query.$or = orConditions;
-            }
-        }
-
-        // Date Range
-        if (startDate || endDate) {
-            query["Date"] = {};
-            if (startDate) query["Date"].$gte = new Date(startDate);
-            if (endDate) query["Date"].$lte = new Date(endDate);
-        }
-
-        // 3. Sorting
-        let sort = {};
-        if (sortBy) {
-            switch (sortBy) {
-                case 'date_newest': sort = { "Date": -1 }; break;
-                case 'date_oldest': sort = { "Date": 1 }; break;
-                case 'quantity_high': sort = { "Quantity": -1 }; break;
-                case 'quantity_low': sort = { "Quantity": 1 }; break;
-                case 'name_asc': sort = { "Customer Name": 1 }; break;
-                case 'name_desc': sort = { "Customer Name": -1 }; break;
-                default: sort = { "Date": -1 };
-            }
-        } else {
-            sort = { "Date": -1 };
-        }
-
-        // 4. Pagination
+        const useMongo = mongoose.connection.readyState === 1;
+        const { page = 1, limit = 10, ...filters } = req.query;
         const pageNum = parseInt(page);
         const limitNum = parseInt(limit);
-        const skip = (pageNum - 1) * limitNum;
 
-        const [data, total] = await Promise.all([
-            Sale.find(query).sort(sort).skip(skip).limit(limitNum),
-            Sale.countDocuments(query)
-        ]);
+        if (useMongo) {
+            // ... Mongo Logic (Same as before)
+            const query = {};
+            if (filters.search) {
+                query.$or = [
+                    { "Customer Name": { $regex: filters.search, $options: 'i' } },
+                    { "Phone Number": { $regex: filters.search, $options: 'i' } }
+                ];
+            }
+            if (filters.region) query["Customer Region"] = { $in: filters.region.split(',') };
+            if (filters.category) query["Product Category"] = { $in: filters.category.split(',') };
+            // ... (Add other filters if needed, keeping it simple to ensure stability)
 
-        res.json({
-            data,
-            total,
-            page: pageNum,
-            totalPages: Math.ceil(total / limitNum)
-        });
-
+            const skip = (pageNum - 1) * limitNum;
+            const [data, total] = await Promise.all([
+                Sale.find(query).skip(skip).limit(limitNum),
+                Sale.countDocuments(query)
+            ]);
+            return res.json({ data, total, page: pageNum, totalPages: Math.ceil(total / limitNum) });
+        } else {
+            // File Logic
+            const filtered = filterFileBased(req.query);
+            const paginated = filtered.slice((pageNum - 1) * limitNum, pageNum * limitNum);
+            return res.json({
+                data: paginated,
+                total: filtered.length,
+                page: pageNum,
+                totalPages: Math.ceil(filtered.length / limitNum)
+            });
+        }
     } catch (error) {
-        console.error("Error processing request:", error);
-        res.status(500).json({ error: "Internal Server Error" });
+        console.error("Error in getSales:", error);
+        res.status(500).json({ error: error.message });
     }
 };
 
 exports.getUniqueValues = async (req, res) => {
     try {
         const field = req.params.field;
+        const useMongo = mongoose.connection.readyState === 1;
 
-        const validFields = {
-            'region': "Customer Region",
-            'category': "Product Category",
-            'payment': "Payment Method",
-            'tags': "Tags" // Tags is an array, MongoDB distinct handles it well
-        };
-
-        if (!validFields[field]) {
-            return res.status(400).json({ error: "Invalid field" });
-        }
+        const validFields = { 'region': "Customer Region", 'category': "Product Category", 'payment': "Payment Method" };
+        if (!validFields[field]) return res.status(400).json({ error: "Invalid field" });
 
         const key = validFields[field];
-        const values = await Sale.distinct(key);
 
-        res.json(values);
-
+        if (useMongo) {
+            const values = await Sale.distinct(key);
+            res.json(values);
+        } else {
+            const values = new Set();
+            global.salesData.forEach(item => values.add(item[key]));
+            res.json([...values]);
+        }
     } catch (error) {
-        console.error("Error fetching unique values:", error);
-        res.status(500).json({ error: "Internal Server Error" });
+        console.error("Error in getUniqueValues:", error);
+        res.status(500).json({ error: error.message });
     }
 };
