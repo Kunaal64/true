@@ -20,6 +20,7 @@ global.salesData = [];
 mongoose.connect(process.env.MONGO_URI, { serverSelectionTimeoutMS: 5000 })
     .then(() => {
         console.log('Connected to MongoDB');
+        console.log('DB Name:', mongoose.connection.name);
         global.isMongoConnected = true;
     })
     .catch(err => {

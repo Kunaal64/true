@@ -101,6 +101,21 @@ exports.getSales = async (req, res) => {
     }
 };
 
+exports.getHealth = async (req, res) => {
+    try {
+        const count = await Sale.countDocuments({});
+        res.json({
+            status: 'ok',
+            mongoConnected: mongoose.connection.readyState === 1,
+            dbName: mongoose.connection.name,
+            recordCount: count,
+            fileRecordCount: global.salesData ? global.salesData.length : 0
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+};
+
 exports.getUniqueValues = async (req, res) => {
     try {
         const field = req.params.field;
