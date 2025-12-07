@@ -58,6 +58,9 @@ const filterFileBased = (params) => {
 exports.getSales = async (req, res) => {
     try {
         const useMongo = mongoose.connection.readyState === 1;
+        console.log("Checking Data Source. Mongo Connected:", useMongo);
+        console.log("Global Sales Data Length:", global.salesData ? global.salesData.length : 'Undefined');
+
         const { page = 1, limit = 10, ...filters } = req.query;
         const pageNum = parseInt(page);
         const limitNum = parseInt(limit);
